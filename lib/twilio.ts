@@ -2,6 +2,7 @@ import twilio from 'twilio'
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID || ''
 const authToken = process.env.TWILIO_AUTH_TOKEN || ''
+const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID || ''
 const fromNumber = process.env.TWILIO_PHONE_NUMBER || ''
 
 function getClient() {
@@ -9,11 +10,20 @@ function getClient() {
 }
 
 export async function sendSMS(to: string, body: string): Promise<void> {
-  await getClient().messages.create({
+  const opts: { body: string; to: string; messagingServiceSid?: string; from?: string } = {
     body,
-    from: fromNumber,
     to,
-  })
+  }
+
+  // Prefer Messaging Service (auto-selects best sender per country)
+  // Fall back to single phone number for local dev / simple setups
+  if (messagingServiceSid) {
+    opts.messagingServiceSid = messagingServiceSid
+  } else {
+    opts.from = fromNumber
+  }
+
+  await getClient().messages.create(opts)
 }
 
 export function validateTwilioRequest(

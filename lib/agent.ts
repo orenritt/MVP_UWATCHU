@@ -36,6 +36,7 @@ function initConversationState(): ConversationState {
       failure_modes: null,
       stake_amount: null,
       charity_id: null,
+      timezone: null,
     },
   }
 }
@@ -168,6 +169,9 @@ async function continueConversation(
   }
   if (convState.extracted.charity_id) {
     updateData.charity_id = convState.extracted.charity_id
+  }
+  if (convState.extracted.timezone) {
+    updateData.timezone = convState.extracted.timezone
   }
   if (convState.extracted.goal_type || convState.extracted.proof_instructions) {
     updateData.goal_parsed = {

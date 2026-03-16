@@ -57,6 +57,7 @@ export interface Commitment {
   slug: string | null
   starts_at: string | null
   ends_at: string | null
+  timezone: string
   created_at: string
   conversation_state: ConversationState | null
   // Joined fields
@@ -105,7 +106,7 @@ export interface Charity {
 }
 
 export type ConversationState = {
-  state: 'collecting_goal' | 'collecting_verification' | 'collecting_cadence' | 'collecting_failure_modes' | 'collecting_stake' | 'collecting_charity' | 'confirming' | 'complete'
+  state: 'collecting_goal' | 'collecting_verification' | 'collecting_cadence' | 'collecting_timezone' | 'collecting_failure_modes' | 'collecting_stake' | 'collecting_charity' | 'confirming' | 'complete'
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
   extracted: {
     goal_text: string | null
@@ -116,6 +117,7 @@ export type ConversationState = {
     failure_modes: Commitment['failure_modes'] | null
     stake_amount: number | null
     charity_id: string | null
+    timezone: string | null
   }
 }
 

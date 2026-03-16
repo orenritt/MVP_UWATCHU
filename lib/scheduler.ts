@@ -1,14 +1,13 @@
 import {
   eachDayOfInterval,
   format,
-  setHours,
-  setMinutes,
   addHours,
   subHours,
   startOfWeek,
   addWeeks,
   isBefore,
 } from 'date-fns'
+import { fromZonedTime } from 'date-fns-tz'
 import type { Commitment } from './supabase'
 
 export interface ReminderSlot {
@@ -22,14 +21,25 @@ function parseTime(timeStr: string): { hours: number; minutes: number } {
   return { hours, minutes }
 }
 
-function setTime(date: Date, timeStr: string): Date {
+/**
+ * Sets time on a date in the user's timezone, returns UTC Date.
+ * e.g. "09:00" in "America/New_York" on Jan 15 → Jan 15 14:00 UTC (EST)
+ */
+function setTimeInZone(date: Date, timeStr: string, timezone: string): Date {
   const { hours, minutes } = parseTime(timeStr)
-  return setMinutes(setHours(new Date(date), hours), minutes)
+  // Build a "wall clock" date in the target timezone
+  const year = date.getUTCFullYear()
+  const month = date.getUTCMonth()
+  const day = date.getUTCDate()
+  const zonedWall = new Date(year, month, day, hours, minutes, 0, 0)
+  // Convert from the user's local wall-clock time to UTC
+  return fromZonedTime(zonedWall, timezone)
 }
 
 export function buildReminderSchedule(commitment: Commitment): ReminderSlot[] {
   const slots: ReminderSlot[] = []
-  const { cadence, starts_at, ends_at } = commitment
+  const { cadence, starts_at, ends_at, timezone } = commitment
+  const tz = timezone || 'America/New_York'
 
   if (!starts_at || !ends_at) return slots
 
@@ -39,9 +49,9 @@ export function buildReminderSchedule(commitment: Commitment): ReminderSlot[] {
   if (cadence.type === 'daily' || cadence.type === 'abstinence') {
     eachDayOfInterval({ start, end }).forEach((day, i) => {
       slots.push({
-        scheduledFor: setTime(day, cadence.reminder_time),
+        scheduledFor: setTimeInZone(day, cadence.reminder_time, tz),
         periodId: `day-${i}`,
-        proofDeadline: setTime(day, cadence.proof_deadline_time),
+        proofDeadline: setTimeInZone(day, cadence.proof_deadline_time, tz),
       })
     })
   }
@@ -54,9 +64,9 @@ export function buildReminderSchedule(commitment: Commitment): ReminderSlot[] {
       })
       .forEach((day, i) => {
         slots.push({
-          scheduledFor: setTime(day, cadence.reminder_time),
+          scheduledFor: setTimeInZone(day, cadence.reminder_time, tz),
           periodId: `slot-${i}`,
-          proofDeadline: setTime(day, cadence.proof_deadline_time),
+          proofDeadline: setTimeInZone(day, cadence.proof_deadline_time, tz),
         })
       })
   }
@@ -66,7 +76,7 @@ export function buildReminderSchedule(commitment: Commitment): ReminderSlot[] {
     let weekStart = startOfWeek(start)
     let weekIndex = 0
     while (isBefore(weekStart, end)) {
-      const reminderTime = setTime(weekStart, cadence.reminder_time)
+      const reminderTime = setTimeInZone(weekStart, cadence.reminder_time, tz)
       if (isBefore(start, reminderTime) || start.getTime() === reminderTime.getTime()) {
         // Skip if before start
       }
@@ -99,9 +109,10 @@ export function getProofDeadline(
   const schedule = buildReminderSchedule(commitment)
   const slot = schedule.find((s) => s.periodId === periodId)
   if (!slot) {
-    // Fallback: 22:00 today
+    // Fallback: proof_deadline_time today in user's timezone
+    const tz = commitment.timezone || 'America/New_York'
     const now = new Date()
-    return setTime(now, commitment.cadence.proof_deadline_time || '22:00')
+    return setTimeInZone(now, commitment.cadence.proof_deadline_time || '22:00', tz)
   }
   return slot.proofDeadline
 }
