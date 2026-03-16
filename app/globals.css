@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --border: #1f1f1f;
+  --text-primary: #e8e8e8;
+  --text-secondary: #555555;
+  --accent: #ff3b00;
+  --accent-success: #00ff41;
+  --stake-color: #ff3b00;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: 'IBM Plex Mono', 'Courier New', 'Courier', monospace;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+
+/* Camera input styling */
+input[type="file"] {
+  display: none;
+}
