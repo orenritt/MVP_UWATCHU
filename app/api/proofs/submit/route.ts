@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isDevMode } from '@/lib/dev'
 import { supabaseAdmin, getCommitment } from '@/lib/supabase'
+import { devInsertProof, devGetProofsForCommitment } from '@/lib/dev-db'
 import {
   generatePerceptualHash,
   checkForDuplicate,
@@ -38,31 +40,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Read image buffer
     const arrayBuffer = await image.arrayBuffer()
     const imageBuffer = Buffer.from(arrayBuffer)
 
-    // Generate perceptual hash
-    const hash = await generatePerceptualHash(imageBuffer)
-
-    // Check for duplicates
-    const { isDuplicate, matchedProofId } = await checkForDuplicate(
-      commitmentId,
-      hash
-    )
-
-    // Create proof record
     const proofId = crypto.randomUUID()
-    const imageUrl = await uploadProofImage(
-      commitmentId,
-      proofId,
-      imageBuffer,
-      image.type
-    )
-
-    // Determine the current period ID based on timing
     const now = new Date()
     const periodId = `manual-${now.toISOString().split('T')[0]}`
+
+    if (isDevMode) {
+      // In dev mode: skip Supabase storage, generate hash but use local image URL
+      const hash = await generatePerceptualHash(imageBuffer)
+
+      devInsertProof({
+        id: proofId,
+        commitment_id: commitmentId,
+        period_id: periodId,
+        submitted_at: now.toISOString(),
+        image_url: `/dev/proof-placeholder.png`,
+        gps_lat: gpsLat ? parseFloat(gpsLat) : null,
+        gps_lng: gpsLng ? parseFloat(gpsLng) : null,
+        browser_timestamp: browserTimestamp || null,
+        perceptual_hash: hash,
+        status: 'submitted',
+        flagged_reason: null,
+      })
+
+      const proofs = devGetProofsForCommitment(commitmentId)
+      await sendSMS(
+        commitment.user.phone_number,
+        `UWATCHU: Proof received. ${proofs.length} submitted so far.`
+      )
+
+      return NextResponse.json({ success: true, proof_id: proofId, flagged: false })
+    }
+
+    // Production path
+    const hash = await generatePerceptualHash(imageBuffer)
+    const { isDuplicate, matchedProofId } = await checkForDuplicate(commitmentId, hash)
+    const imageUrl = await uploadProofImage(commitmentId, proofId, imageBuffer, image.type)
 
     const proofData = {
       id: proofId,
@@ -82,14 +97,12 @@ export async function POST(request: NextRequest) {
 
     await supabaseAdmin.from('proofs').insert(proofData)
 
-    // Count proofs for this commitment
     const { count: proofCount } = await supabaseAdmin
       .from('proofs')
       .select('*', { count: 'exact', head: true })
       .eq('commitment_id', commitmentId)
       .in('status', ['submitted', 'approved'])
 
-    // Get total expected proofs (rough estimate)
     const { count: totalSlots } = await supabaseAdmin
       .from('reminders')
       .select('*', { count: 'exact', head: true })

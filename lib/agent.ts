@@ -1,10 +1,15 @@
 import { callAgent, type AgentResponse } from './anthropic'
+import { isDevMode } from './dev'
 import {
   supabaseAdmin,
   getOrCreateUser,
   getActiveCommitment,
   getPendingCommitment,
   getCharities,
+  updateCommitmentStatus,
+  devInsertCommitment,
+  devUpdateCommitment,
+  devUpdateUser,
   type User,
   type Commitment,
   type ConversationState,
@@ -12,7 +17,7 @@ import {
 import { getOrCreateStripeCustomer, createSetupIntent } from './stripe'
 import { sendSMS } from './twilio'
 
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://uwatchu.com'
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
 
 function generateSlug(): string {
   const adjectives = ['cold', 'iron', 'dark', 'grim', 'stark', 'hard', 'dead', 'raw', 'bare', 'flat']
@@ -54,14 +59,22 @@ export async function handleInboundSMS(
     new Date(user.re_engagement_window_closes_at) > new Date()
   ) {
     // Clear re-engagement state and start new intake
-    await supabaseAdmin
-      .from('users')
-      .update({
+    if (isDevMode) {
+      devUpdateUser(user.id, {
         re_engagement_touch: 0,
         re_engagement_commitment_id: null,
         re_engagement_window_closes_at: null,
       })
-      .eq('id', user.id)
+    } else {
+      await supabaseAdmin
+        .from('users')
+        .update({
+          re_engagement_touch: 0,
+          re_engagement_commitment_id: null,
+          re_engagement_window_closes_at: null,
+        })
+        .eq('id', user.id)
+    }
 
     return await startNewIntake(user, messageBody)
   }
@@ -70,7 +83,6 @@ export async function handleInboundSMS(
   const active = await getActiveCommitment(user.id)
 
   if (active && active.status === 'active') {
-    // User has active commitment — treat as a message, not new intake
     return `UWATCHU: You have an active commitment. Submit proof at ${BASE_URL}/g/${active.slug}/prove`
   }
 
@@ -105,17 +117,23 @@ async function startNewIntake(user: User, messageBody: string): Promise<string> 
 
   // Create pending commitment
   const slug = generateSlug()
-  await supabaseAdmin.from('commitments').insert({
+  const commitmentData = {
     user_id: user.id,
     goal_text: messageBody,
     verification_method: 'pending',
-    cadence: { type: 'daily', reminder_time: '09:00', proof_deadline_time: '22:00', allowed_misses: 0 },
+    cadence: { type: 'daily' as const, reminder_time: '09:00', proof_deadline_time: '22:00', allowed_misses: 0 },
     failure_modes: { max_consecutive_misses: 2, max_total_misses: 5, deadline_hard: true },
     stake_amount: 0,
-    status: 'pending_payment',
+    status: 'pending_payment' as const,
     slug,
     conversation_state: convState,
-  })
+  }
+
+  if (isDevMode) {
+    devInsertCommitment(commitmentData)
+  } else {
+    await supabaseAdmin.from('commitments').insert(commitmentData)
+  }
 
   return agentResponse.reply
 }
@@ -182,10 +200,14 @@ async function continueConversation(
     }
   }
 
-  await supabaseAdmin
-    .from('commitments')
-    .update(updateData)
-    .eq('id', commitment.id)
+  if (isDevMode) {
+    devUpdateCommitment(commitment.id, updateData)
+  } else {
+    await supabaseAdmin
+      .from('commitments')
+      .update(updateData)
+      .eq('id', commitment.id)
+  }
 
   // If ready to create — finalize and send Stripe setup link
   if (agentResponse.ready_to_create) {
@@ -196,6 +218,35 @@ async function continueConversation(
 }
 
 async function finalizeCommitment(user: User, commitmentId: string): Promise<void> {
+  // Set start/end dates
+  const startsAt = new Date()
+  let endDays = 28
+
+  if (isDevMode) {
+    const { devGetCommitment } = await import('./dev-db')
+    const commitment = devGetCommitment(commitmentId)
+    if (!commitment) return
+
+    const cadence = commitment.cadence
+    if (cadence.type === 'deadline') endDays = 30
+
+    const endsAt = new Date(startsAt.getTime() + endDays * 24 * 60 * 60 * 1000)
+
+    // In dev mode, skip Stripe — auto-activate
+    devUpdateCommitment(commitmentId, {
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
+      stripe_setup_intent_id: `dev_seti_${crypto.randomUUID().slice(0, 8)}`,
+      status: 'active',
+    })
+
+    await sendSMS(
+      user.phone_number,
+      `UWATCHU: Commitment locked. The machine is watching. View: ${BASE_URL}/g/${commitment.slug}`
+    )
+    return
+  }
+
   const { data: commitment } = await supabaseAdmin
     .from('commitments')
     .select('*')
@@ -204,14 +255,8 @@ async function finalizeCommitment(user: User, commitmentId: string): Promise<voi
 
   if (!commitment) return
 
-  // Set start/end dates
-  const startsAt = new Date()
   const cadence = commitment.cadence as Commitment['cadence']
-  let endDays = 28 // default 4 weeks
-  if (cadence.type === 'deadline') {
-    // Keep whatever was negotiated
-    endDays = 30
-  }
+  if (cadence.type === 'deadline') endDays = 30
   const endsAt = new Date(startsAt.getTime() + endDays * 24 * 60 * 60 * 1000)
 
   // Create Stripe setup

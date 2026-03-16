@@ -1,4 +1,20 @@
 import { createClient } from '@supabase/supabase-js'
+import { isDevMode } from './dev'
+import {
+  devGetOrCreateUser,
+  devUpdateUser,
+  devInsertCommitment,
+  devUpdateCommitment,
+  devGetCommitment,
+  devGetCommitmentBySlug,
+  devGetActiveCommitment,
+  devGetPendingCommitment,
+  devGetProofsForCommitment,
+  devWasProofSubmitted,
+  devGetMissesForCommitment,
+  devRecordMiss,
+  devGetCharities,
+} from './dev-db'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -121,8 +137,11 @@ export type ConversationState = {
   }
 }
 
-// Helper functions
+// Helper functions — branch on dev mode
+
 export async function getOrCreateUser(phoneNumber: string): Promise<User> {
+  if (isDevMode) return devGetOrCreateUser(phoneNumber)
+
   const { data: existing } = await supabaseAdmin
     .from('users')
     .select('*')
@@ -142,6 +161,8 @@ export async function getOrCreateUser(phoneNumber: string): Promise<User> {
 }
 
 export async function getActiveCommitment(userId: string): Promise<Commitment | null> {
+  if (isDevMode) return devGetActiveCommitment(userId)
+
   const { data } = await supabaseAdmin
     .from('commitments')
     .select('*, charity:charities(*)')
@@ -155,6 +176,8 @@ export async function getActiveCommitment(userId: string): Promise<Commitment | 
 }
 
 export async function getPendingCommitment(userId: string): Promise<Commitment | null> {
+  if (isDevMode) return devGetPendingCommitment(userId)
+
   const { data } = await supabaseAdmin
     .from('commitments')
     .select('*')
@@ -168,6 +191,12 @@ export async function getPendingCommitment(userId: string): Promise<Commitment |
 }
 
 export async function getCommitment(commitmentId: string): Promise<Commitment & { user: User; charity: Charity }> {
+  if (isDevMode) {
+    const result = devGetCommitment(commitmentId)
+    if (!result) throw new Error(`Commitment ${commitmentId} not found`)
+    return result
+  }
+
   const { data, error } = await supabaseAdmin
     .from('commitments')
     .select('*, user:users(*), charity:charities(*)')
@@ -179,6 +208,8 @@ export async function getCommitment(commitmentId: string): Promise<Commitment & 
 }
 
 export async function getCommitmentBySlug(slug: string): Promise<(Commitment & { user: User; charity: Charity }) | null> {
+  if (isDevMode) return devGetCommitmentBySlug(slug)
+
   const { data } = await supabaseAdmin
     .from('commitments')
     .select('*, user:users(*), charity:charities(*)')
@@ -189,6 +220,8 @@ export async function getCommitmentBySlug(slug: string): Promise<(Commitment & {
 }
 
 export async function getProofsForCommitment(commitmentId: string): Promise<Proof[]> {
+  if (isDevMode) return devGetProofsForCommitment(commitmentId)
+
   const { data } = await supabaseAdmin
     .from('proofs')
     .select('*')
@@ -199,6 +232,8 @@ export async function getProofsForCommitment(commitmentId: string): Promise<Proo
 }
 
 export async function getMissesForCommitment(commitmentId: string): Promise<Miss[]> {
+  if (isDevMode) return devGetMissesForCommitment(commitmentId)
+
   const { data } = await supabaseAdmin
     .from('misses')
     .select('*')
@@ -209,6 +244,8 @@ export async function getMissesForCommitment(commitmentId: string): Promise<Miss
 }
 
 export async function getCharities(): Promise<Charity[]> {
+  if (isDevMode) return devGetCharities()
+
   const { data } = await supabaseAdmin
     .from('charities')
     .select('*')
@@ -219,6 +256,8 @@ export async function getCharities(): Promise<Charity[]> {
 }
 
 export async function wasProofSubmitted(commitmentId: string, periodId: string): Promise<boolean> {
+  if (isDevMode) return devWasProofSubmitted(commitmentId, periodId)
+
   const { count } = await supabaseAdmin
     .from('proofs')
     .select('*', { count: 'exact', head: true })
@@ -230,10 +269,11 @@ export async function wasProofSubmitted(commitmentId: string, periodId: string):
 }
 
 export async function recordMiss(commitmentId: string, periodId: string): Promise<{ triggersFailure: boolean }> {
+  if (isDevMode) return devRecordMiss(commitmentId, periodId)
+
   const commitment = await getCommitment(commitmentId)
   const misses = await getMissesForCommitment(commitmentId)
 
-  // Calculate consecutive count
   const recentMisses = misses.filter(m => !m.triggered_failure)
   const consecutiveCount = recentMisses.length > 0
     ? recentMisses[recentMisses.length - 1].consecutive_count + 1
@@ -261,6 +301,11 @@ export async function updateCommitmentStatus(
   commitmentId: string,
   status: Commitment['status']
 ): Promise<void> {
+  if (isDevMode) {
+    devUpdateCommitment(commitmentId, { status })
+    return
+  }
+
   const { error } = await supabaseAdmin
     .from('commitments')
     .update({ status })
@@ -268,3 +313,6 @@ export async function updateCommitmentStatus(
 
   if (error) throw error
 }
+
+// Re-export dev helpers for direct use in agent.ts
+export { devInsertCommitment, devUpdateCommitment, devUpdateUser }

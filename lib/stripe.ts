@@ -1,15 +1,24 @@
 import Stripe from 'stripe'
+import { isDevMode } from './dev'
 import { supabaseAdmin } from './supabase'
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_placeholder', {
-  apiVersion: '2025-02-24.acacia',
-})
+export const stripe = isDevMode
+  ? (null as unknown as Stripe)
+  : new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_placeholder', {
+      apiVersion: '2025-02-24.acacia',
+    })
 
 export async function getOrCreateStripeCustomer(
   userId: string,
   phoneNumber: string
 ): Promise<string> {
-  // Check if user already has a Stripe customer ID
+  if (isDevMode) {
+    const devId = `dev_cus_${userId.slice(0, 8)}`
+    const { devUpdateUser } = await import('./dev-db')
+    devUpdateUser(userId, { stripe_customer_id: devId })
+    return devId
+  }
+
   const { data: user } = await supabaseAdmin
     .from('users')
     .select('stripe_customer_id')
@@ -18,13 +27,11 @@ export async function getOrCreateStripeCustomer(
 
   if (user?.stripe_customer_id) return user.stripe_customer_id
 
-  // Create new Stripe customer
   const customer = await stripe.customers.create({
     phone: phoneNumber,
     metadata: { user_id: userId },
   })
 
-  // Save customer ID
   await supabaseAdmin
     .from('users')
     .update({ stripe_customer_id: customer.id })
@@ -38,7 +45,17 @@ export async function createSetupIntent(
   commitmentId: string,
   stakeAmount: number
 ): Promise<Stripe.SetupIntent> {
-  const setupIntent = await stripe.setupIntents.create({
+  if (isDevMode) {
+    return {
+      id: `dev_seti_${crypto.randomUUID().slice(0, 8)}`,
+      client_secret: 'dev_secret',
+      customer: customerId,
+      metadata: { commitment_id: commitmentId, stake_amount: stakeAmount.toString() },
+      payment_method: `dev_pm_${crypto.randomUUID().slice(0, 8)}`,
+    } as unknown as Stripe.SetupIntent
+  }
+
+  return stripe.setupIntents.create({
     customer: customerId,
     usage: 'off_session',
     metadata: {
@@ -46,11 +63,14 @@ export async function createSetupIntent(
       stake_amount: stakeAmount.toString(),
     },
   })
-
-  return setupIntent
 }
 
 export async function captureStripePayment(commitmentId: string): Promise<void> {
+  if (isDevMode) {
+    console.log(`[DEV STRIPE] Would capture payment for commitment ${commitmentId}`)
+    return
+  }
+
   const { data: commitment } = await supabaseAdmin
     .from('commitments')
     .select('*, user:users(*)')
@@ -59,7 +79,6 @@ export async function captureStripePayment(commitmentId: string): Promise<void> 
 
   if (!commitment) throw new Error(`Commitment ${commitmentId} not found`)
 
-  // Get the customer's payment method from the setup intent
   const setupIntent = await stripe.setupIntents.retrieve(
     commitment.stripe_setup_intent_id
   )
@@ -68,7 +87,6 @@ export async function captureStripePayment(commitmentId: string): Promise<void> 
     throw new Error('No payment method found on setup intent')
   }
 
-  // Create and capture a payment intent
   const paymentIntent = await stripe.paymentIntents.create({
     amount: commitment.stake_amount,
     currency: 'usd',
@@ -91,6 +109,10 @@ export async function captureStripePayment(commitmentId: string): Promise<void> 
 export async function getSetupIntentClientSecret(
   commitmentId: string
 ): Promise<{ clientSecret: string; publishableKey: string }> {
+  if (isDevMode) {
+    return { clientSecret: 'dev_secret', publishableKey: 'dev_pk' }
+  }
+
   const { data: commitment } = await supabaseAdmin
     .from('commitments')
     .select('stripe_setup_intent_id')

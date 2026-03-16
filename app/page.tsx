@@ -1,3 +1,9 @@
+import Link from 'next/link'
+
+const isDevMode =
+  process.env.NEXT_PUBLIC_DEV_MODE === 'true' ||
+  !process.env.NEXT_PUBLIC_SUPABASE_URL
+
 export default function Home() {
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -12,6 +18,20 @@ export default function Home() {
         <div className="font-mono text-xs text-[#333] tracking-wider">
           Text your commitment to get started.
         </div>
+
+        {isDevMode && (
+          <div className="pt-8 space-y-3">
+            <Link
+              href="/dev/sms"
+              className="inline-block bg-[#e8e8e8] text-[#0a0a0a] font-mono text-xs font-bold px-8 py-3 tracking-widest hover:bg-white transition-colors"
+            >
+              OPEN SMS SIMULATOR
+            </Link>
+            <div className="font-mono text-[10px] text-[#333]">
+              Dev mode active — no external services required except Anthropic API
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

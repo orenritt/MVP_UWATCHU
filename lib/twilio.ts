@@ -1,4 +1,5 @@
 import twilio from 'twilio'
+import { isDevMode, logDevSMS } from './dev'
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID || ''
 const authToken = process.env.TWILIO_AUTH_TOKEN || ''
@@ -10,13 +11,21 @@ function getClient() {
 }
 
 export async function sendSMS(to: string, body: string): Promise<void> {
+  if (isDevMode) {
+    logDevSMS({
+      from: 'UWATCHU',
+      to,
+      body,
+      direction: 'outbound',
+    })
+    return
+  }
+
   const opts: { body: string; to: string; messagingServiceSid?: string; from?: string } = {
     body,
     to,
   }
 
-  // Prefer Messaging Service (auto-selects best sender per country)
-  // Fall back to single phone number for local dev / simple setups
   if (messagingServiceSid) {
     opts.messagingServiceSid = messagingServiceSid
   } else {
@@ -31,5 +40,6 @@ export function validateTwilioRequest(
   url: string,
   params: Record<string, string>
 ): boolean {
+  if (isDevMode) return true
   return twilio.validateRequest(authToken, signature, url, params)
 }

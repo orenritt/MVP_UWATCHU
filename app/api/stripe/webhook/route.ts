@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isDevMode } from '@/lib/dev'
 import { stripe } from '@/lib/stripe'
 import { supabaseAdmin, updateCommitmentStatus } from '@/lib/supabase'
 import { inngest } from '@/lib/inngest/client'
@@ -6,6 +7,10 @@ import { sendSMS } from '@/lib/twilio'
 import type Stripe from 'stripe'
 
 export async function POST(request: NextRequest) {
+  if (isDevMode) {
+    return NextResponse.json({ received: true, dev: true })
+  }
+
   const body = await request.text()
   const signature = request.headers.get('stripe-signature')
 

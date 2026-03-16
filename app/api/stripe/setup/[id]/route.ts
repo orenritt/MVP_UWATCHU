@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isDevMode } from '@/lib/dev'
 import { getSetupIntentClientSecret } from '@/lib/stripe'
 
 export async function GET(
@@ -8,9 +9,50 @@ export async function GET(
   try {
     const { id: commitmentId } = await params
 
+    // In dev mode, commitment is auto-activated — show confirmation
+    if (isDevMode) {
+      const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UWATCHU — Stake Locked</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      color: #e8e8e8;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .success { text-align: center; color: #00ff41; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    p { font-size: 12px; color: #555; }
+    .dev-badge {
+      margin-top: 24px;
+      font-size: 10px;
+      color: #333;
+      letter-spacing: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="success">
+    <h2>STAKE LOCKED.</h2>
+    <p>The machine is watching.</p>
+    <div class="dev-badge">DEV MODE — Stripe skipped, commitment auto-activated</div>
+  </div>
+</body>
+</html>`
+      return new NextResponse(html, { headers: { 'Content-Type': 'text/html' } })
+    }
+
     const { clientSecret, publishableKey } = await getSetupIntentClientSecret(commitmentId)
 
-    // Return an HTML page with Stripe Elements for card setup
     const html = `<!DOCTYPE html>
 <html>
 <head>
